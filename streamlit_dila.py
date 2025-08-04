@@ -12,7 +12,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, precision_score, recall_score, f1_score, ConfusionMatrixDisplay
 from wordcloud import WordCloud
 from sklearn.feature_extraction.text import CountVectorizer
-from imblearn.over_sampling import SMOTE
+# Hapus SMOTE import untuk menghindari error
 
 st.set_page_config(layout="wide", page_title="Klasifikasi Stunting NBC")
 
@@ -26,6 +26,54 @@ def load_data(file):
     except FileNotFoundError:
         st.error(f"Error: File '{file}' tidak ditemukan. Pastikan path file benar.")
         return None
+
+def manual_oversample(X, y, random_state=42):
+    """
+    Manual oversampling untuk menggantikan SMOTE
+    """
+    np.random.seed(random_state)
+    
+    # Hitung jumlah sampel untuk setiap kelas
+    unique, counts = np.unique(y, return_counts=True)
+    max_count = max(counts)
+    
+    X_resampled = []
+    y_resampled = []
+    
+    for label in unique:
+        # Ambil sampel untuk kelas ini
+        mask = y == label
+        X_class = X[mask]
+        y_class = y[mask]
+        
+        # Jika kelas ini minority, lakukan oversampling
+        current_count = len(X_class)
+        if current_count < max_count:
+            # Hitung berapa banyak sampel tambahan yang dibutuhkan
+            additional_needed = max_count - current_count
+            
+            # Random sampling dengan replacement
+            indices = np.random.choice(len(X_class), additional_needed, replace=True)
+            X_additional = X_class[indices]
+            y_additional = y_class[indices]
+            
+            # Gabungkan dengan data asli
+            X_class_resampled = np.vstack([X_class, X_additional])
+            y_class_resampled = np.hstack([y_class, y_additional])
+        else:
+            X_class_resampled = X_class
+            y_class_resampled = y_class
+        
+        X_resampled.append(X_class_resampled)
+        y_resampled.append(y_class_resampled)
+    
+    # Gabungkan semua kelas
+    X_final = np.vstack(X_resampled)
+    y_final = np.hstack(y_resampled)
+    
+    # Shuffle data
+    indices = np.random.permutation(len(X_final))
+    return X_final[indices], y_final[indices]
 
 @st.cache_resource
 def train_naive_bayes(_X_train, _y_train):
@@ -62,12 +110,11 @@ def main():
         X, y, test_size=0.2, stratify=y, random_state=42
     )
 
-    # Terapkan SMOTE pada data training
-    smote = SMOTE(random_state=42)
-    X_train, y_train = smote.fit_resample(X_train_ori, y_train_ori)
+    # Terapkan manual oversampling menggantikan SMOTE
+    X_train, y_train = manual_oversample(X_train_ori, y_train_ori, random_state=42)
 
     tab1, tab2, tab3, tab4 = st.tabs([
-        "Distribusi Data (Sebelum & Sesudah SMOTE)", 
+        "Distribusi Data (Sebelum & Sesudah Balancing)", 
         "Kata Populer & Wordcloud",
         "Modeling Naive Bayes", 
         "Evaluasi Model (Confusion Matrix & Classification Report)"
@@ -79,14 +126,14 @@ def main():
         col1, col2 = st.columns([1, 2])
 
         with col1:
-            st.markdown("Jumlah Data per Label (Sebelum SMOTE)")
+            st.markdown("Jumlah Data per Label (Dataset Asli)")
             vc = pd.Series(y).value_counts().rename(index=label_names)
             df_vc = vc.to_frame('Jumlah Data')
             total = pd.DataFrame({'Jumlah Data': [df_vc['Jumlah Data'].sum()]}, index=['Total'])
             st.dataframe(pd.concat([df_vc, total]))
 
         with col2:
-            st.markdown("Visualisasi Distribusi Label (Sebelum SMOTE)")
+            st.markdown("Visualisasi Distribusi Label (Dataset Asli)")
             fig_vc, ax_vc = plt.subplots(figsize=(8, 4))
             sns.barplot(x=vc.index, y=vc.values, ax=ax_vc, palette="viridis")
             ax_vc.set_title("Distribusi Label pada Keseluruhan Dataset")
@@ -96,21 +143,23 @@ def main():
             st.pyplot(fig_vc)
 
         st.markdown("---")
-        st.subheader("Distribusi Data Setelah SMOTE (Data Latih)")
+        st.subheader("Distribusi Data Setelah Balancing (Data Latih)")
 
         col3, col4 = st.columns(2)
         with col3:
-            st.markdown("**Sebelum SMOTE**")
+            st.markdown("**Sebelum Balancing**")
             fig1, ax1 = plt.subplots()
             sns.countplot(x=y_train_ori, palette="rocket", ax=ax1)
             ax1.set_xticklabels(label_names.values())
+            ax1.set_title("Data Training Asli")
             st.pyplot(fig1)
 
         with col4:
-            st.markdown("**Setelah SMOTE**")
+            st.markdown("**Setelah Balancing**")
             fig2, ax2 = plt.subplots()
             sns.countplot(x=y_train, palette="crest", ax=ax2)
             ax2.set_xticklabels(label_names.values())
+            ax2.set_title("Data Training Setelah Balancing")
             st.pyplot(fig2)
 
         st.markdown("---")
@@ -181,7 +230,7 @@ def main():
 
     with tab3:
         st.header("Modeling Naive Bayes")
-        st.success("Model dilatih dengan data hasil SMOTE!")
+        st.success("Model dilatih dengan data hasil balancing!")
 
         # Lakukan prediksi pada data latih dan uji
         y_pred_train = model.predict(X_train)
